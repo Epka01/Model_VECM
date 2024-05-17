@@ -1,0 +1,188 @@
+---
+title: "VECM"
+author: "Ewelina Nieć"
+output: 
+  html_document:
+    code_folding: hide
+    theme: cerulean
+---
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+library(readxl)
+library(readr)
+library(dplyr)
+library(zoo)
+library(vars)
+library(bruceR)
+library(aTSA)
+library(tsDyn)
+```
+
+*W projekcie przyjętym poziomem istotności jest 0,05.*
+
+# Cel projektu
+
+Celem projektu VECM jest analiza i modelowanie zależności długookresowych między zmiennymi makroekonomicznymi, identyfikacja równowagi długookresowej oraz badanie dynamiki i mechanizmów dostosowania tych zmiennych.
+
+Do tej analizy zostały pobrane dane dotyczące Holandii, takie jak:
+
+- HICP (inflacja)
+- unemployment (bezrobocie)
+- production_in_industry (produkcja przemysłowa)
+- AEX (indeks giełdowy Holandii)
+- USD_EUR (kurs walut)
+
+
+# Przygotowanie danych
+
+Aby przygotować dane do tworzenia modeli VECM po wczytaniu ich, usunięto braki oraz połączono wszyskie do jednej tabeli.
+
+```{r, message=FALSE}
+# ----wczytywanie danych----
+NL_HICP <- read_excel("C:/Users/eweli/OneDrive/Desktop/AW/projekt3/dane/NL_HICP.xlsx", sheet = "Arkusz1")
+colnames(NL_HICP) <- c("TIME", "HICP")
+NL_unemployment <- read_excel("C:/Users/eweli/OneDrive/Desktop/AW/projekt3/dane/NL_unemployment.xlsx", sheet = "Arkusz1")
+colnames(NL_unemployment) <- c("TIME", "unemployment")
+NL_production_in_industry <- read_excel("C:/Users/eweli/OneDrive/Desktop/AW/projekt3/dane/NL_production_in_industry.xlsx", sheet = "Arkusz1")
+colnames(NL_production_in_industry) <- c("TIME", "production_in_industry")
+
+NL_AEX <- read_csv("C:/Users/eweli/OneDrive/Desktop/AW/projekt3/dane/NL_AEX.csv")
+NL_AEX <- NL_AEX[,c(1,5)]
+colnames(NL_AEX) <- c("TIME", "AEX")
+NL_AEX$TIME <- str_sub(as.character(NL_AEX$TIME), start = 1, end = 7)
+NL_AEX$AEX <- log(NL_AEX$AEX)
+
+NL_USD_EUR <- read_csv("C:/Users/eweli/OneDrive/Desktop/AW/projekt3/dane/NL_USD_EUR.csv")
+NL_USD_EUR <- NL_USD_EUR[,c(1,5)]
+colnames(NL_USD_EUR) <- c("TIME", "USD_EUR")
+NL_USD_EUR$TIME <- str_sub(as.character(NL_USD_EUR$TIME), start = 1, end = 7)
+
+# ----usuwanie braków----
+NL_HICP <- na.omit(NL_HICP)
+NL_unemployment <- na.omit(NL_unemployment)
+NL_production_in_industry <- na.omit(NL_production_in_industry)
+
+# ----łączenie danych do jednej tabeli----
+NL <- NL_HICP %>% full_join(NL_unemployment, by = "TIME")
+NL <- NL %>% full_join(NL_production_in_industry, by = "TIME")
+NL <- NL %>% full_join(NL_AEX, by = "TIME")
+NL <- NL %>% full_join(NL_USD_EUR, by = "TIME")
+NL <- na.omit(NL) 
+NL <- NL[order(NL$TIME), ] # sortowanie
+rm(NL_HICP, NL_unemployment, NL_production_in_industry, NL_AEX, NL_USD_EUR)
+
+# ----przekształcanie danych----
+NL$HICP <- as.numeric(NL$HICP)
+NL$unemployment <- as.numeric(NL$unemployment)
+NL$production_in_industry <- as.numeric(NL$production_in_industry)
+```
+
+# Wyznaczenie opóźnienia
+
+Następnym krokiem jest wyznaczenie opóźnienia na jeszcze surowych danych, czyli przed potencjalnym różnicowaniem.
+
+```{r}
+VARselect(as.matrix(NL[,c(-1)]))
+```
+
+Opóźnienie wynosi 1
+
+# Sprawdzanie stacjonarności
+
+Modele VECM wykonuje się na niestacjonarnych danych, dlatego musimy sprawdzić, czy dane są stacjonarne.
+
+Hipotezy testu ADF:
+
+H0 : szereg jest niestacjonarny
+
+H1 : szereg jest stacjonarny
+
+```{r}
+adf.test(NL$HICP)
+adf.test(NL$unemployment)
+adf.test(NL$production_in_industry)
+adf.test(NL$AEX)
+adf.test(NL$USD_EUR)
+```
+
+Wśród wszystkich zmiennych tylko HICP jest stacjonarna. 
+
+# Różnicowanie
+
+Ponieważ prawie wszystkie zmienne są niestacjonarne należy wykonać różnicowanie, aby sprawdzić, czy jest to niestacjonarność pierwszego stopnia, czyli, czy po jednym różnicowaniu jestśmy w stanie pozbyć się niestacjonarności.
+
+```{r}
+diff_HICP <- diff(NL$HICP)
+diff_unemployment <- diff(NL$unemployment)
+diff_production_in_industry <- diff(NL$production_in_industry)
+diff_AEX <- diff(NL$AEX)
+diff_USD_EUR <- diff(NL$USD_EUR)
+
+NL_diff <- data.frame("HICP" = diff_HICP, "unemployment" = diff_unemployment, 
+                      "production_in_industry" = diff_production_in_industry,
+                      "AEX" = diff_AEX, "USD_EUR" = diff_USD_EUR)
+rm(diff_HICP, diff_unemployment, diff_production_in_industry, diff_AEX, diff_USD_EUR)
+```
+
+Po wykonanym różnicowaniu sprawdzamy ile wynosi opóźnienie oraz przeprowadzamy test ADF.
+
+```{r}
+VARselect(as.matrix(NL_diff))
+```
+
+W tym przypadku opóźnienie również wynosi 1
+
+```{r}
+adf.test(NL_diff$HICP)
+adf.test(NL_diff$unemployment)
+adf.test(NL_diff$production_in_industry)
+adf.test(NL_diff$AEX)
+```
+
+Teraz już wszystkie zmienne są stacjonarne, to oznacza, że możemy przeprowadzić VECM na tych danych przed różnicowaniem.
+
+# Test Johansena
+
+Test Johansena służy do badania stopnia kointegracji między zmiennymi czasowymi.
+
+Kointegracja oznacza, że zmienne są związane długookresowo i mają wspólną równowagę, pomimo występowania krótkookresowych zaburzeń.
+
+```{r}
+jotest=ca.jo(NL[,-1], type="trace", K=2, ecdet="none", spec="longrun")
+summary(jotest)
+```
+
+Otrzymujemy, że r = 3 -> stopień kointegracji wynosi 3 (istnieją 3 liniowo niezależne wektory kointegrujące)
+
+W praktyce oznacza to, że można uwzględnić 3 korekty błędów (error correction terms) w modelu, które opisują dynamikę dostosowania zmiennych do ich długoterminowej równowagi.
+
+# VECM
+
+```{r}
+model_vecm <- VECM(NL[,-1], lag=1, r=3, estim = "ML")
+summary(model_vecm)
+```
+
+Wartości ECT wskazują na szybkość i kierunek dostosowywania się zmiennych do ich długoterminowej równowagi po wystąpieniu zakłóceń.
+
+Ujemna wartość ECT wskazuje na szybkie tempo powrotu zmiennej do równowagi po jej odchyleniu.
+
+Dodatnia wartość ECT może oznaczać silniejsze lub bardziej trwałe oddziaływanie na powrót zmiennej do długoterminowej równowagi.
+
+
+Warto tutaj zauważyć, że wszystkie modele posiadają chociaż jedną zmienną ECT istotną. Większość z istotnych zmiennych ECT jest ujemnych, co oznacza, że jeżeli wystąpią jakieś anomalie, to wszystkie modele sobie dobrze z tym poradzą i szybko wrócą do długoterminowej równowagi. Może to być zasługa tego, że Holandia ma dość stabilny i silny rynek.
+
+Natomiast HICP -1 i USD_EUR -1 w żadnym z modeli nie jest istotny.
+
+Poniżej przedstawiam które zmienne dla którego modelu są istotne:
+
+- model HICP: ECT1, ECT2 
+- model unemployment: ECT2, Intercept, unemployment -1 *(-1 oznacza poprzedni okres)*
+- model production_in_industry: ECT2, ECT3, Intercept, unemployment -1, production_in_industry -1
+- model AEX: ECT3
+- model USD_EUR: ECT2, ECT3, production_in_industry -1, AEX -1
+
+
+
+
+
